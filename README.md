@@ -1,7 +1,9 @@
 # Filament Study
 
-Not include [google/filament](https://github.com/google/filament).
+## Dependency
 
-# Index
+Not included [google/filament](https://github.com/google/filament) on this repository.
+
+## Index
 
 1. [Moving Circle](./mc/README.md)
