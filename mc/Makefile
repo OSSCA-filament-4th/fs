@@ -1,0 +1,8 @@
+INCS=${FILAMENT_HOME}/include
+LIBS=${FILAMENT_HOME}/lib
+
+TARGET_NAME=mc
+TARGET_SRCS=mc.cpp
+
+all:
+	$(CXX) $(TARGET_SRCS) -o ${TARGET_NAME} -I$(INCS) -L$(LIBS) -lm -std=c++17
