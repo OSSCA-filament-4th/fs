@@ -84,35 +84,34 @@ struct App {
 
 float randf() { return (float)rand() / (float)RAND_MAX; }
 
-float randf(float m, float p) { return m * randf() + p * randf(); }
+float randf(float a, float b) { return a + randf() * (b - a); }
 
 float dist(filament::math::float2 left, filament::math::float2 right) 
 {
     return sqrt((right.x - left.x) * (right.x - left.x) + (right.y - left.y) * (right.y - left.y));
 }
 
-void Collision(Circle& a, Circle& b)
+void Collision(Circle& a, Circle& b, float distance)
 {
-    float distance = dist(a.mCenter, b.mCenter);
-    if (distance <= a.mRadius + b.mRadius)
-    {
-        float normalX = (b.mCenter.x - a.mCenter.x) / distance;
-        float normalY = (b.mCenter.y - a.mCenter.y) / distance;
+    filament::math::float2 colVec = { b.mCenter.x - a.mCenter.x, b.mCenter.y - a.mCenter.y };
+    filament::math::float2 colDir = { colVec.x / distance, colVec.y / distance };
+    filament::math::float2 relativeVelocity = { a.mVelocity.x - b.mVelocity.x, a.mVelocity.y - b.mVelocity.y };
+    
+    float dotProduct = relativeVelocity.x * colDir.x + relativeVelocity.y * colDir.y;
+    if (dotProduct > 0) return;
 
-        float relativeVelocityX = a.mVelocity.x - b.mVelocity.x;
-        float relativeVelocityY = a.mVelocity.y - b.mVelocity.y;
+    float j = -(1 + 0.8f) * dotProduct;
+    j /= (1 / a.mMass + 1 / b.mMass);
 
-        float dotProduct = relativeVelocityX * normalX + relativeVelocityY * normalY;
-        if (dotProduct > 0) return;
+    filament::math::float2 impulse = { j * colDir.x, j * colDir.y };
 
-        float impulse = (2 * b.mMass) / (a.mMass + b.mMass) * dotProduct;
+    float maxSpeed = 5.0f;
 
-        a.mVelocity.x -= impulse * normalX / a.mMass;
-        a.mVelocity.y -= impulse * normalY / a.mMass;
+    a.mVelocity.x = filament::math::clamp(a.mVelocity.x - ( 1 / a.mMass * impulse.x ), -maxSpeed, maxSpeed);
+    a.mVelocity.y = filament::math::clamp(a.mVelocity.y - ( 1 / a.mMass * impulse.y ), -maxSpeed, maxSpeed);
 
-        b.mVelocity.x += impulse * normalX / b.mMass;
-        b.mVelocity.y += impulse * normalY / b.mMass;
-    }
+    b.mVelocity.x = filament::math::clamp(b.mVelocity.x + ( 1 / b.mMass * impulse.x ), -maxSpeed, maxSpeed);
+    b.mVelocity.y = filament::math::clamp(b.mVelocity.y + ( 1 / b.mMass * impulse.y ), -maxSpeed, maxSpeed);
 }
 
 Circle CreateCircle(App& sApp)
@@ -122,12 +121,12 @@ Circle CreateCircle(App& sApp)
 
     do {
         isCollision = false;
-        sCircle.mRadius   = randf(0.8f, 1.3f);
+        sCircle.mRadius   = randf(1.5f, 3.5f);
         sCircle.mMass     = sCircle.mRadius * sCircle.mRadius;
-        sCircle.mColor    = (uint32_t)(randf(0.0f, 1.0f) * (rand() % 0xFFFFFFFF));
+        sCircle.mColor    = (uint32_t)(randf() * (rand() % 0xFFFFFFFF));
         sCircle.mCenter   = { 
-            randf(-5.0f, 5.0f), 
-            randf(-5.0f, 5.0f) 
+            randf(-10.0f, 10.0f), 
+            randf(-10.0f, 10.0f) 
         };
 
         for (int i = 0; i < sApp.mCurrentCount; ++i)
@@ -229,7 +228,7 @@ static int handleCommandLineArguments(int argc, char* argv[], App* app) {
 
 int main(int argc, char** argv) {
     App sApp{};
-    sApp.mConfig.title = "movingcircles";                    
+    sApp.mConfig.title = "movingcircles";
     sApp.mConfig.backend = Engine::Backend::OPENGL;
     handleCommandLineArguments(argc, argv, &sApp);
 
@@ -302,7 +301,7 @@ int main(int argc, char** argv) {
     };
 
     FilamentApp::get().animate([&sApp](Engine* engine, View* view, double now) {
-        constexpr float ZOOM = 10.0f;
+        constexpr float ZOOM = 20.0f;
         const uint32_t w = view->getViewport().width;
         const uint32_t h = view->getViewport().height;
         const float aspect = (float) w / h;
@@ -313,23 +312,25 @@ int main(int argc, char** argv) {
         auto& tcm = engine->getTransformManager();
         for (int i = 0; i < gCircleCount; ++i)
         {
-            float x = sApp.mRenderableArr[i].mCircle.mCenter.x;
-            float y = sApp.mRenderableArr[i].mCircle.mCenter.y;
-
-            x += sApp.mRenderableArr[i].mCircle.mVelocity.x / gSpeed;
-            y += sApp.mRenderableArr[i].mCircle.mVelocity.y / gSpeed;
+            sApp.mRenderableArr[i].mCircle.mCenter.x += sApp.mRenderableArr[i].mCircle.mVelocity.x / gSpeed;
+            sApp.mRenderableArr[i].mCircle.mCenter.y += sApp.mRenderableArr[i].mCircle.mVelocity.y / gSpeed;
 
             tcm.setTransform(tcm.getInstance(sApp.mRenderableArr[i].mRenderable), 
-                             filament::math::mat4f::translation(filament::math::float3(x, y, 0)));
-
-            sApp.mRenderableArr[i].mCircle.mCenter = { x, y };
+                             filament::math::mat4f::translation(filament::math::float3(
+                                sApp.mRenderableArr[i].mCircle.mCenter.x,
+                                sApp.mRenderableArr[i].mCircle.mCenter.y, 0)));
         }
 
         for (int i = 0; i < gCircleCount; ++i)
         {
             for (int j = i + 1; j < gCircleCount; ++j)
             {
-                Collision(sApp.mRenderableArr[i].mCircle, sApp.mRenderableArr[j].mCircle);
+                float distance = dist(sApp.mRenderableArr[i].mCircle.mCenter,
+                                      sApp.mRenderableArr[j].mCircle.mCenter);
+                if (distance <= sApp.mRenderableArr[i].mCircle.mRadius + sApp.mRenderableArr[j].mCircle.mRadius)
+                {
+                    Collision(sApp.mRenderableArr[i].mCircle, sApp.mRenderableArr[j].mCircle, distance);
+                }
             }
         }
     });
