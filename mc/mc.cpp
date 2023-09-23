@@ -48,7 +48,7 @@ struct Vertex {
     uint32_t               mColor;
 };
 
-const int   gCircleCount = 20;
+const int   gCircleCount = 10;
 const int   gSegments    = 100;
 const float gSpeed       = 20.0f;
 Vertex      gVertices[gSegments + 1];
@@ -144,7 +144,7 @@ Circle CreateCircle(App& sApp)
     return sCircle;
 }
  
-void initBuffers()
+void initBuffers(Circle& aCircle)
 {
     gVertices[0].mPos   = { 0, 0 };
     gVertices[0].mColor = (uint32_t)(randf() * (rand() % 0xFFFFFFFF));
@@ -152,8 +152,8 @@ void initBuffers()
     for (int i = 0; i < gSegments; ++i)
     {
         float theta = (2.0f * M_PI * float(i)) / float(gSegments);
-        gVertices[i + 1].mPos.x = cosf(theta);
-        gVertices[i + 1].mPos.y = sinf(theta);
+        gVertices[i + 1].mPos.x = aCircle.mRadius * cosf(theta);
+        gVertices[i + 1].mPos.y = aCircle.mRadius * sinf(theta);
         gVertices[i + 1].mColor = 0xFFFFFFFF;
 
         gIndicies[i * 3] = 0;
@@ -221,8 +221,6 @@ int main(int argc, char** argv) {
     handleCommandLineArguments(argc, argv, &sApp);
 
     srand(time(NULL));
-
-    initBuffers();
     
     auto setup = [&sApp](Engine* engine, View* view, Scene* scene) {
         sApp.mSkybox = Skybox::Builder().color({0.1, 0.125, 0.25, 1.0}).build(*engine);
@@ -230,6 +228,10 @@ int main(int argc, char** argv) {
         auto& tcm = engine->getTransformManager();
         for (int i = 0; i < gCircleCount; ++i)
         {
+            Circle sCircle = CreateCircle(sApp);
+            sApp.mRenderableArr[i].mCircle = sCircle;
+            initBuffers(sApp.mRenderableArr[i].mCircle);
+
             sApp.mVertexBuffer = VertexBuffer::Builder()
                                 .vertexCount(gSegments + 1)
                                 .bufferCount(1)
@@ -260,10 +262,6 @@ int main(int argc, char** argv) {
                                          .build(*engine, sApp.mRenderableArr[i].mRenderable);
             
             scene->addEntity(sApp.mRenderableArr[i].mRenderable);
-
-            Circle sCircle = CreateCircle(sApp);
-            sApp.mRenderableArr[i].mCircle = sCircle;
-            tcm.setTransform(tcm.getInstance(sApp.mRenderableArr[i].mRenderable), filament::math::mat4::scaling(sApp.mRenderableArr[i].mCircle.mRadius));
         }
 
         sApp.mCameraObj = utils::EntityManager::get().create();
