@@ -49,11 +49,10 @@ struct App {
     VertexBuffer* vb;
     IndexBuffer* ib;
     Material* mat;
-    Camera* cam;
-    Entity camera;
     Skybox* skybox;
     Sphere* sphere;
     Entity renderable;
+    filament::math::mat4f transform;
 };
 
 struct Vertex {
@@ -73,10 +72,12 @@ float randf(float a, float b) { return a + randf() * (b - a); }
 
 void genVertices(Sphere* aSphere)
 {
-    for (int i = 0; i < gLatitude; ++i) 
+    uint32_t color = 0xFF000000;
+    for (int i = 0; i <= gLatitude; ++i) 
     {
         float theta = i * (M_PI / (gLatitude - 1));
-        for (int j = 0; j < gLongitude; ++j)
+        color += 0x02;
+        for (int j = 0; j <= gLongitude; ++j)
         {
             float phi = j * (2 * M_PI / gLongitude);
 
@@ -86,7 +87,7 @@ void genVertices(Sphere* aSphere)
                     aSphere->mRadius * sin(theta) * sin(phi),
                     aSphere->mRadius * cos(theta),
                 },
-                (uint32_t)(randf() * (rand() % 0xFFFFFFFF))
+                color
             };
 
             aSphere->mVertices.push_back(vertex);
@@ -105,16 +106,13 @@ void genIndicies(Sphere* aSphere)
             int idx2 = (i + 1) * (gLongitude + 1) + j;
             int idx3 = (i + 1) * (gLongitude + 1) + j + 1;
 
-            if (i < gLatitude - 1 && j < gLongitude - 1)
-            {
-                aSphere->mIndicies.push_back(idx0);
-                aSphere->mIndicies.push_back(idx1);
-                aSphere->mIndicies.push_back(idx2);
+            aSphere->mIndicies.push_back(idx0);
+            aSphere->mIndicies.push_back(idx1);
+            aSphere->mIndicies.push_back(idx2);
 
-                aSphere->mIndicies.push_back(idx2);
-                aSphere->mIndicies.push_back(idx1);
-                aSphere->mIndicies.push_back(idx3);
-            }
+            aSphere->mIndicies.push_back(idx2);
+            aSphere->mIndicies.push_back(idx1);
+            aSphere->mIndicies.push_back(idx3);
         }
     }
 }
@@ -161,17 +159,17 @@ int main(int argc, char** argv) {
         app.renderable = EntityManager::get().create();
         RenderableManager::Builder(1)
                         .material(0, app.mat->getDefaultInstance())
-                        .geometry(0, RenderableManager::PrimitiveType::LINES, app.vb, app.ib, 0, app.sphere->mIndicies.size())
+                        .geometry(0, RenderableManager::PrimitiveType::TRIANGLES, app.vb, app.ib, 0, app.sphere->mIndicies.size())
                         .culling(false)
                         .receiveShadows(false)
                         .castShadows(false)
                         .build(*engine, app.renderable);
-
+        
+        auto& tcm = engine->getTransformManager();
+        auto ti = tcm.getInstance(app.renderable);
+        app.transform = filament::math::mat4f { filament::math::mat3f(1), filament::math::float3(0, 0, -4) } * tcm.getWorldTransform(ti);
         scene->addEntity(app.renderable);
-
-        app.camera = utils::EntityManager::get().create();
-        app.cam = engine->createCamera(app.camera);
-        view->setCamera(app.cam);
+        tcm.setTransform(ti, app.transform);
     };
 
     auto cleanup = [&app](Engine* engine, View*, Scene*) {
@@ -181,16 +179,13 @@ int main(int argc, char** argv) {
         engine->destroy(app.vb);
         engine->destroy(app.ib);
 
-        engine->destroyCameraComponent(app.camera);
-        utils::EntityManager::get().destroy(app.camera);
-
         delete app.sphere;
     };
 
     FilamentApp::get().animate([&app](Engine* engine, View* view, double now) {
-        // auto& tcm = engine->getTransformManager();
-        // tcm.setTransform(tcm.getInstance(app.renderable),
-        //         filament::math::mat4f::rotation(now, filament::math::float3{ 0, 0, 1 }));
+        auto& tcm = engine->getTransformManager();
+        auto ti = tcm.getInstance(app.renderable);
+        tcm.setTransform(ti, filament::math::mat4f::rotation(now, filament::math::float3{ 1, 1, 0 }));
     });
 
     FilamentApp::get().run(config, setup, cleanup);
