@@ -56,8 +56,10 @@ uint16_t    gIndicies[gSegments * 3];
 double      gLastTime    = 0.0;
 
 struct Circle {
+    uint16_t               mUID;
     filament::math::float2 mCenter;
     filament::math::float2 mVelocity;
+    float                  mMass;
     float                  mRadius;
 };
 
@@ -96,19 +98,9 @@ float dist(filament::math::float2 left, filament::math::float2 right)
 
 void collisionUpdate(Circle& a, Circle& b)
 {
-    filament::math::float2 origin = { a.mVelocity.x, a.mVelocity.y };
-    filament::math::float2 colDir = { b.mCenter.x - a.mCenter.x, b.mCenter.y - a.mCenter.y };
-    filament::math::float2 normal = { colDir.x / dist(a.mCenter, b.mCenter), colDir.y / dist(a.mCenter, b.mCenter)};
-    filament::math::float2 relativeVelocity = { b.mVelocity.x - a.mVelocity.x, b.mVelocity.y - a.mVelocity.y };
-    float dotProduct = (relativeVelocity.x * normal.x) + (relativeVelocity.y * normal.y);
-    if (dotProduct >= 0) return;
-
-    a.mVelocity = { a.mVelocity.x + colDir.x * normal.x, a.mVelocity.y + colDir.y * normal.y };
-    b.mVelocity = { b.mVelocity.x + colDir.x * normal.x, b.mVelocity.y + colDir.y * normal.y };
-
-    float friction = 0.2f;
-    a.mVelocity = { a.mVelocity.x * friction, a.mVelocity.y * friction };
-    b.mVelocity = { b.mVelocity.x * friction, b.mVelocity.y * friction };
+	filament::math::float2 temp = a.mVelocity;
+	a.mVelocity = a.mVelocity - 2 * (b.mMass / (a.mMass + b.mMass)) * (dot((a.mVelocity - b.mVelocity), (a.mCenter - b.mCenter)) / length2(a.mCenter - b.mCenter)) * (a.mCenter - b.mCenter);
+	b.mVelocity = b.mVelocity - 2 * (a.mMass / (a.mMass + b.mMass)) * (dot((b.mVelocity - temp), (b.mCenter - a.mCenter)) / length2(b.mCenter - a.mCenter)) * (b.mCenter - a.mCenter);
 }
 
 Circle CreateCircle(App& sApp)
@@ -116,11 +108,12 @@ Circle CreateCircle(App& sApp)
     Circle sCircle;
     bool   isCollision;
 
-    sCircle.mRadius   = randf(1.5f, 3.5f);
+    sCircle.mRadius   = randf(2.5f, 3.5f);
     sCircle.mVelocity = { 
-        randf(-3.0f, 3.0f),
-        randf(-3.0f, 3.0f)
+        randf(-5.0f, 5.0f),
+        randf(-5.0f, 5.0f)
     };
+    sCircle.mMass     = sCircle.mRadius * sCircle.mRadius;
 
     do {
         isCollision     = false;
@@ -139,12 +132,13 @@ Circle CreateCircle(App& sApp)
         }
     } while (isCollision);
 
+    sCircle.mUID = sApp.mCurrentCount;
     sApp.mCurrentCount++;
     
     return sCircle;
 }
  
-void initBuffers(Circle& aCircle)
+void initBuffers()
 {
     gVertices[0].mPos   = { 0, 0 };
     gVertices[0].mColor = (uint32_t)(randf() * (rand() % 0xFFFFFFFF));
@@ -152,13 +146,78 @@ void initBuffers(Circle& aCircle)
     for (int i = 0; i < gSegments; ++i)
     {
         float theta = (2.0f * M_PI * float(i)) / float(gSegments);
-        gVertices[i + 1].mPos.x = aCircle.mRadius * cosf(theta);
-        gVertices[i + 1].mPos.y = aCircle.mRadius * sinf(theta);
-        gVertices[i + 1].mColor = 0xFFFFFFFF;
+        gVertices[i + 1].mPos.x = cosf(theta);
+        gVertices[i + 1].mPos.y = sinf(theta);
+        gVertices[i + 1].mColor = 0xFFFF0000;
 
         gIndicies[i * 3] = 0;
         gIndicies[i * 3 + 1] = i + 1;
         gIndicies[i * 3 + 2] = (i + 1) % gSegments + 1;
+    }
+}
+
+
+void Move(Circle& target, double deltaTime)
+{
+    for (int i = 0; i < gCircleCount; ++i)
+    {
+        target.mCenter.x += (target.mVelocity.x * deltaTime);
+        target.mCenter.y += (target.mVelocity.y * deltaTime);
+    }
+}
+
+void WallCollision(filament::math::float4 wall, Circle& target)
+{
+    // left
+    if (abs(wall.x - target.mCenter.x) <= target.mRadius || target.mCenter.x < wall.x)
+    {
+        target.mCenter.x += target.mRadius - target.mCenter.x + wall.x;
+        target.mVelocity.x = -target.mVelocity.x;
+    }
+    // right
+    if (abs(wall.y - target.mCenter.x) <= target.mRadius || target.mCenter.x > wall.y)
+    {
+        target.mCenter.x -= target.mRadius + target.mCenter.x - wall.y;
+        target.mVelocity.x = -target.mVelocity.x;
+    }
+    // bottom
+    if (abs(wall.z - target.mCenter.y) <= target.mRadius || target.mCenter.y < wall.z)
+    {
+        target.mCenter.y += target.mRadius - target.mCenter.y + wall.z;
+        target.mVelocity.y = -target.mVelocity.y;
+    }
+    // up
+    if (abs(wall.w - target.mCenter.y) <= target.mRadius || target.mCenter.y > wall.w)
+    {
+        target.mCenter.y -= target.mRadius + target.mCenter.y - wall.w;
+        target.mVelocity.y = -target.mVelocity.y;
+    }
+}
+
+void CircleCollision(Circle& target, App& app)
+{
+    for (int j = 0; j < gCircleCount; ++j)
+    {
+        Circle& other = app.mRenderableArr[j].mCircle;
+        if (target.mUID == other.mUID) continue;
+        
+        float distance = dist(target.mCenter, other.mCenter);
+        float diameter = target.mRadius + other.mRadius;
+        float diff = diameter - distance;
+        if (distance <= diameter)
+        {
+            filament::math::float2 firstImpulse = {
+                diff / distance * (target.mCenter.x - other.mCenter.x),
+                diff / distance * (target.mCenter.y - other.mCenter.y),
+            };
+            target.mCenter.x += (firstImpulse.x / 2);
+            target.mCenter.y += (firstImpulse.y / 2);
+
+            other.mCenter.x -= (firstImpulse.x / 2);
+            other.mCenter.y -= (firstImpulse.y / 2);
+
+            collisionUpdate(target, other);
+        }
     }
 }
 
@@ -226,27 +285,29 @@ int main(int argc, char** argv) {
         sApp.mSkybox = Skybox::Builder().color({0.1, 0.125, 0.25, 1.0}).build(*engine);
         scene->setSkybox(sApp.mSkybox);
         auto& tcm = engine->getTransformManager();
+
+        initBuffers();
+
+        sApp.mVertexBuffer = VertexBuffer::Builder()
+                                 .vertexCount(gSegments + 1)
+                                 .bufferCount(1)
+                                 .attribute(VertexAttribute::POSITION, 0, VertexBuffer::AttributeType::FLOAT2, 0, 12)
+                                 .attribute(VertexAttribute::COLOR, 0, VertexBuffer::AttributeType::UBYTE4, 8, 12)
+                                 .build(*engine);
+
+        sApp.mVertexBuffer->setBufferAt(*engine, 0, VertexBuffer::BufferDescriptor(gVertices, sizeof(Vertex) * (gSegments + 1), nullptr));
+
+        sApp.mIndexBuffer = IndexBuffer::Builder()
+                                .indexCount(gSegments * 3)
+                                .bufferType(IndexBuffer::IndexType::USHORT)
+                                .build(*engine);
+
+        sApp.mIndexBuffer->setBuffer(*engine, IndexBuffer::BufferDescriptor(gIndicies, sizeof(uint16_t) * gSegments * 3, nullptr));
+
         for (int i = 0; i < gCircleCount; ++i)
         {
             Circle sCircle = CreateCircle(sApp);
             sApp.mRenderableArr[i].mCircle = sCircle;
-            initBuffers(sApp.mRenderableArr[i].mCircle);
-
-            sApp.mVertexBuffer = VertexBuffer::Builder()
-                                .vertexCount(gSegments + 1)
-                                .bufferCount(1)
-                                .attribute(VertexAttribute::POSITION, 0, VertexBuffer::AttributeType::FLOAT2, 0, 12)
-                                .attribute(VertexAttribute::COLOR, 0, VertexBuffer::AttributeType::UBYTE4, 8, 12)
-                                .build(*engine);
-
-            sApp.mVertexBuffer->setBufferAt(*engine, 0, VertexBuffer::BufferDescriptor(gVertices, sizeof(Vertex) * (gSegments + 1), nullptr));
-
-            sApp.mIndexBuffer = IndexBuffer::Builder()
-                               .indexCount(gSegments * 3)
-                               .bufferType(IndexBuffer::IndexType::USHORT)
-                               .build(*engine);
-
-            sApp.mIndexBuffer->setBuffer(*engine, IndexBuffer::BufferDescriptor(gIndicies, sizeof(uint16_t) * gSegments * 3, nullptr));
 
             sApp.mRenderableArr[i].mMaterial = Material::Builder()
                                               .package(RESOURCES_BAKEDCOLOR_DATA, RESOURCES_BAKEDCOLOR_SIZE)
@@ -255,7 +316,7 @@ int main(int argc, char** argv) {
             sApp.mRenderableArr[i].mRenderable = EntityManager::get().create();
 
             RenderableManager::Builder(1).material(0, sApp.mRenderableArr[i].mMaterial->getDefaultInstance())
-                                         .geometry(0, RenderableManager::PrimitiveType::TRIANGLES, sApp.mVertexBuffer, sApp.mIndexBuffer, 0, gSegments * 3)
+                                         .geometry(0, RenderableManager::PrimitiveType::TRIANGLE, sApp.mVertexBuffer, sApp.mIndexBuffer, 0, gSegments * 3)
                                          .culling(false)
                                          .receiveShadows(false)
                                          .castShadows(false)
@@ -285,76 +346,30 @@ int main(int argc, char** argv) {
     };
 
     FilamentApp::get().animate([&sApp](Engine* engine, View* view, double now) {
+        auto& tcm = engine->getTransformManager();
         double deltaTime = now - gLastTime;
         gLastTime = now;
 
-        constexpr float ZOOM = 20.0f;
+        constexpr float ZOOM = 30.0f;
         const uint32_t w = view->getViewport().width;
         const uint32_t h = view->getViewport().height;
         const float aspect = (float) w / h;
-        // left, right, bottom, top
-        filament::math::float4 wall = { -aspect * ZOOM, aspect * ZOOM, -ZOOM, ZOOM };
-        sApp.mCamera->setProjection(Camera::Projection::ORTHO, wall.x, wall.y, wall.z, wall.w, 0, 1);
 
-        auto& tcm = engine->getTransformManager();
+        // left, right, bottom, top
+        filament::math::float4 sWall = { -aspect * ZOOM, aspect * ZOOM, -ZOOM, ZOOM };
+        sApp.mCamera->setProjection(Camera::Projection::ORTHO, sWall.x, sWall.y, sWall.z, sWall.w, 0, 1);
+
+        for (int i = 0; i < gCircleCount; ++i) Move(sApp.mRenderableArr[i].mCircle, deltaTime);
+        for (int i = 0; i < gCircleCount; ++i) CircleCollision(sApp.mRenderableArr[i].mCircle, sApp);
+        for (int i = 0; i < gCircleCount; ++i) WallCollision(sWall, sApp.mRenderableArr[i].mCircle);
         for (int i = 0; i < gCircleCount; ++i)
         {
             Circle& target = sApp.mRenderableArr[i].mCircle;
-            target.mCenter.x += (target.mVelocity.x * gSpeed * deltaTime);
-            target.mCenter.y += (target.mVelocity.y * gSpeed * deltaTime);
+            filament::math::mat4f s = filament::math::mat4f::scaling(target.mRadius);
+            filament::math::mat4f t = filament::math::mat4f::translation(filament::math::float3(target.mCenter, 0));
+            filament::math::mat4f r = t * s;
 
-            tcm.setTransform(tcm.getInstance(sApp.mRenderableArr[i].mRenderable), 
-                             filament::math::mat4f::translation(
-                                filament::math::float3(
-                                target.mCenter.x,
-                                target.mCenter.y, 0)));
-
-            // left
-            if (abs(wall.x - target.mCenter.x) <= target.mRadius || target.mCenter.x < wall.x)
-            {
-                target.mCenter.x += target.mRadius - target.mCenter.x + wall.x;
-                target.mVelocity.x = -target.mVelocity.x;
-            }
-            // right
-            if (abs(wall.y - target.mCenter.x) <= target.mRadius || target.mCenter.x > wall.y)
-            {
-                target.mCenter.x -= target.mRadius + target.mCenter.x - wall.y;
-                target.mVelocity.x = -target.mVelocity.x;
-            }
-            // bottom
-            if (abs(wall.z - target.mCenter.y) <= target.mRadius || target.mCenter.y < wall.z)
-            {
-                target.mCenter.y += target.mRadius - target.mCenter.y + wall.z;
-                target.mVelocity.y = -target.mVelocity.y;
-            }
-            // up
-            if (abs(wall.w - target.mCenter.y) <= target.mRadius || target.mCenter.y > wall.w)
-            {
-                target.mCenter.y -= target.mRadius + target.mCenter.y - wall.w;
-                target.mVelocity.y = -target.mVelocity.y;
-            }
-
-            for (int j = i + 1; j < gCircleCount; ++j)
-            {
-                Circle& other = sApp.mRenderableArr[j].mCircle;
-                float distance = dist(target.mCenter, other.mCenter);
-                float diameter = target.mRadius + other.mRadius;
-                float diff     = diameter - distance;
-                if (distance <= diameter)
-                {
-                    filament::math::float2 firstImpulse = { 
-                        diff / distance * (target.mCenter.x - other.mCenter.x),
-                        diff / distance * (target.mCenter.y - other.mCenter.y),  
-                    };
-                    target.mCenter.x += (firstImpulse.x / 2);
-                    target.mCenter.y += (firstImpulse.y / 2);
-
-                    other.mCenter.x -= (firstImpulse.x / 2);
-                    other.mCenter.y -= (firstImpulse.y / 2);
-
-                    collisionUpdate(target, other);
-                }
-            }
+            tcm.setTransform(tcm.getInstance(sApp.mRenderableArr[i].mRenderable), r);
         }
     });
 
